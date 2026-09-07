@@ -94,8 +94,9 @@ public class ArrayType extends AbstractType {
      * Unwraps {@link VariableScaleDecimal} elements to their {@code BigDecimal} value, which is what
      * {@link java.sql.Connection#createArrayOf} can encode. Plain {@code BYTES} elements are converted
      * to a typed {@code byte[][]}: the driver rejects a {@code byte[]} element inside a generic
-     * {@code Object[]} but encodes a {@code byte[][]} as a {@code bytea[]} value. Every other element
-     * type is passed through.
+     * {@code Object[]} but encodes a {@code byte[][]} as a {@code bytea[]} value. Array elements are
+     * converted into nested Java arrays for a multidimensional value. Every other element type is
+     * passed through.
      */
     static Object unwrapElements(Schema schema, Object value) {
         if (SchemaUtils.isVariableScaleDecimal(schema.valueSchema())) {
@@ -108,7 +109,27 @@ public class ArrayType extends AbstractType {
                     .map(element -> element == null ? null : ByteArrayUtils.getByteArrayFromValue(element))
                     .toArray(byte[][]::new);
         }
+        if (schema.valueSchema().type() == Schema.Type.ARRAY) {
+            return toNestedArray(schema, (Collection<?>) value);
+        }
         return value;
+    }
+
+    /**
+     * Converts nested collections into nested Java arrays, unwrapping the innermost elements on the
+     * way down. The driver encodes a real Java array element recursively into a PostgreSQL
+     * multidimensional array value, while a plain {@code Collection} element would be rendered
+     * through {@code toString()}.
+     */
+    private static Object[] toNestedArray(Schema arraySchema, Collection<?> elements) {
+        return elements.stream()
+                .map(element -> element == null ? null : toArrayValue(arraySchema.valueSchema(), element))
+                .toArray(Object[]::new);
+    }
+
+    private static Object toArrayValue(Schema innerArraySchema, Object element) {
+        final Object unwrapped = unwrapElements(innerArraySchema, element);
+        return unwrapped instanceof Collection<?> collection ? collection.toArray() : unwrapped;
     }
 
     /**

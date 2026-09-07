@@ -531,6 +531,43 @@ public class JdbcSinkColumnTypeMappingIT extends AbstractJdbcSinkTest {
 
     @ParameterizedTest
     @ArgumentsSource(PostgresInsertModeArgumentsProvider.class)
+    @FixFor("debezium/dbz#2572")
+    public void testShouldWorkWithNestedIntArray(SinkRecordFactory factory, PostgresInsertMode insertMode) throws Exception {
+        final Map<String, String> properties = getDefaultSinkConfig();
+        properties.put(JdbcSinkConnectorConfig.SCHEMA_EVOLUTION, JdbcSinkConnectorConfig.SchemaEvolutionMode.NONE.getValue());
+        properties.put(JdbcSinkConnectorConfig.PRIMARY_KEY_MODE, JdbcSinkConnectorConfig.PrimaryKeyMode.RECORD_KEY.getValue());
+        properties.put(JdbcSinkConnectorConfig.INSERT_MODE, JdbcSinkConnectorConfig.InsertMode.UPSERT.getValue());
+        properties.put(JdbcSinkConnectorConfig.POSTGRES_UNNEST_INSERT, String.valueOf(insertMode.isUnnestEnabled()));
+        startSinkConnector(properties);
+        assertSinkConnectorIsRunning();
+
+        final String tableName = randomTableName();
+        final String topicName = topicName("server2", "schema", tableName);
+
+        JdbcSinkConnectorConfig config = getConfig(properties);
+        final JdbcKafkaSinkRecord createRecord = factory.createRecordWithSchemaValue(
+                topicName,
+                (byte) 1,
+                "data",
+                SchemaBuilder.array(SchemaBuilder.array(Schema.OPTIONAL_INT32_SCHEMA).optional().build()).optional().build(),
+                Arrays.asList(Arrays.asList(1, 2), Arrays.asList(3, 4)),
+                config);
+
+        final String destinationTable = destinationTableName(createRecord);
+        final String sql = "CREATE TABLE %s (id int not null, data int[][], primary key(id))";
+        getSink().execute(String.format(sql, destinationTable));
+
+        consume(createRecord);
+
+        getSink().assertRows(destinationTable, rs -> {
+            assertThat(rs.getInt(1)).isEqualTo(1);
+            assertThat(rs.getArray(2).getArray()).isEqualTo(new Integer[][]{ { 1, 2 }, { 3, 4 } });
+            return null;
+        });
+    }
+
+    @ParameterizedTest
+    @ArgumentsSource(PostgresInsertModeArgumentsProvider.class)
     @FixFor("DBZ-7752")
     public void testShouldWorkWithBoolArray(SinkRecordFactory factory, PostgresInsertMode insertMode) throws Exception {
         final Map<String, String> properties = getDefaultSinkConfig();

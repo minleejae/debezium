@@ -140,6 +140,47 @@ class ArrayTypeTest {
     }
 
     @Test
+    @FixFor("debezium/dbz#2572")
+    @DisplayName("Should convert nested collections to nested Java arrays")
+    void testConvertsNestedCollectionsToNestedArrays() {
+        // A Collection element is rendered through toString() by the driver; only a real Java array
+        // element is encoded recursively into a multidimensional value.
+        final Schema arraySchema = SchemaBuilder.array(
+                SchemaBuilder.array(Schema.OPTIONAL_INT32_SCHEMA).optional().build()).optional().build();
+        final List<Object> elements = Arrays.asList(List.of(1, 2), List.of(3, 4), null);
+
+        assertThat(ArrayType.unwrapElements(arraySchema, elements))
+                .isEqualTo(new Object[]{ new Object[]{ 1, 2 }, new Object[]{ 3, 4 }, null });
+    }
+
+    @Test
+    @FixFor("debezium/dbz#2572")
+    @DisplayName("Should convert three-dimensional collections recursively")
+    void testConvertsThreeDimensionalCollections() {
+        final Schema innerSchema = SchemaBuilder.array(Schema.OPTIONAL_INT32_SCHEMA).optional().build();
+        final Schema middleSchema = SchemaBuilder.array(innerSchema).optional().build();
+        final Schema arraySchema = SchemaBuilder.array(middleSchema).optional().build();
+        final List<Object> elements = List.of(List.of(List.of(1), List.of(2)), List.of(List.of(3), List.of(4)));
+
+        assertThat(ArrayType.unwrapElements(arraySchema, elements))
+                .isEqualTo(new Object[]{
+                        new Object[]{ new Object[]{ 1 }, new Object[]{ 2 } },
+                        new Object[]{ new Object[]{ 3 }, new Object[]{ 4 } } });
+    }
+
+    @Test
+    @FixFor("debezium/dbz#2572")
+    @DisplayName("Should unwrap the innermost elements of nested collections")
+    void testUnwrapsInnermostNestedElements() {
+        final Schema bytesArraySchema = SchemaBuilder.array(Schema.OPTIONAL_BYTES_SCHEMA).optional().build();
+        final Schema arraySchema = SchemaBuilder.array(bytesArraySchema).optional().build();
+        final List<Object> elements = List.of(List.of(new byte[]{ 1 }, ByteBuffer.wrap(new byte[]{ 2 })));
+
+        assertThat(ArrayType.unwrapElements(arraySchema, elements))
+                .isEqualTo(new Object[]{ new byte[][]{ { 1 }, { 2 } } });
+    }
+
+    @Test
     @FixFor("debezium/dbz#2571")
     @DisplayName("Should pass logical BYTES elements through untouched")
     void testPassesLogicalBytesElementsThrough() {
